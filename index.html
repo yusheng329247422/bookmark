@@ -94,7 +94,7 @@ import init, {
   get_and_refresh_eph_map, open_by_eph,
   add_node, edit_node, delete_node, move_node, export_encrypted,
   init_sample_if_empty
-} from '/pkg/wasm_crypto.js';
+} from './pkg/wasm_crypto.js';
 
 const STORAGE_KEY = "bookmarks_cipher_wasm_ephem_v1";
 let isEditor=false, censored=[], ephMap={}, filterKeyword='';
@@ -608,3 +608,4 @@ loadDefaultDataFromFile();
 </script>
 </body>
 </html>
+
