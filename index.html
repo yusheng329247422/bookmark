@@ -28,46 +28,27 @@ input, select{padding:6px 8px; border:1px solid #ddd; border-radius:6px;}
 :root{--bg-color:#ffffff;--text-color:#000000;}
 body{background: var(--bg-color); color: var(--text-color); transition: all 0.3s ease;}
 .theme-picker{margin: 1rem;}
-#batchActions{margin-bottom:10px;}
 </style>
 </head>
 <body>
 <div class="container">
   <div class="toolbar">
-  <h2>🔒 安全书签树 (WASM + Ephemeral)</h2>
-
-  <div class="theme-picker">
-    <label>选择主题颜色: </label>
-    <input type="color" id="bgPicker" value="#ffffff" />
-    <input type="color" id="textPicker" value="#000000" />
-  </div>
-
-  <div class="right">
-    <input id="searchInput" placeholder="搜索名称或标签..." />
-
-	<span style="font-size:0.85em; margin-left:8px;">LocalStorage 数据导入导出</span>
-	<button id="exportBtn" class="btn">导出数据</button>
-
-	<!-- 仅在编辑模式显示 -->
-	<input type="file" id="importFile" style="display:none" />
-	<button id="importBtn2" class="btn" style="display:none">导入数据</button>
-	<button id="importBtn" class="btn" style="display:none">批量导入</button>
-
-	<button id="clearSearchBtn" class="btn">清空搜索</button>
-	<button id="editorBtn" class="btn">进入编辑模式</button>
-
-    <pre id="preview" style="margin-top:4px;"></pre>
-  </div>
-</div>
-
-
-  <!-- 编辑模式批量操作 -->
-  <div id="batchActions" style="display:none;">
-    <select id="batchMoveTarget">
-      <option value="">根目录</option>
-    </select>
-    <button id="batchMoveBtn" class="btn">批量移动</button>
-    <button id="batchDeleteBtn" class="btn btn-primary">批量删除</button>
+    <h2>🔒 安全书签树 (WASM + Ephemeral)</h2>
+    <div class="theme-picker">
+      <label>选择主题颜色: </label>
+      <input type="color" id="bgPicker" value="#ffffff" />
+      <input type="color" id="textPicker" value="#000000" />
+    </div>
+    <div class="right">
+      <input id="searchInput" placeholder="搜索名称或标签..." />
+	   <button id="exportBtn">导出数据</button>
+	  <input type="file" id="importFile" />
+	  <button id="importBtn">导入数据</button>
+      <pre id="preview"></pre>
+      <button id="clearSearchBtn" class="btn">清空搜索</button>
+      <button id="editorBtn" class="btn">进入编辑模式</button>
+      <button id="importBtn" class="btn">批量导入</button>
+    </div>
   </div>
 
   <div id="editorPanel" style="display:none; margin-bottom:10px;">
@@ -89,300 +70,205 @@ body{background: var(--bg-color); color: var(--text-color); transition: all 0.3s
 
 <script type="module">
 import init, {
-  use_embedded_key, verify_editor,
+  use_embedded_key, set_password, verify_editor,
   load_cipher_and_get_censored, get_censored_json,
-  get_and_refresh_eph_map, open_by_eph,
+  get_and_refresh_eph_map, get_current_eph_map, open_by_eph,
   add_node, edit_node, delete_node, move_node, export_encrypted,
   init_sample_if_empty
-} from '/pkg/wasm_crypto.js';
+} from './pkg/wasm_crypto.js';
 
 const STORAGE_KEY = "bookmarks_cipher_wasm_ephem_v1";
-let isEditor=false, censored=[], ephMap={}, filterKeyword='';
+let isEditor = false, censored = [], ephMap = {}, filterKeyword = '';
 
-// 初始化
 async function boot(){
   await init(); use_embedded_key();
-  
-  
-  
-   // await loadDefaultData();
   const cipher = localStorage.getItem(STORAGE_KEY);
-  if(cipher){ try{ censored=JSON.parse(await load_cipher_and_get_censored(cipher)); } catch{ init_sample_if_empty(); censored=JSON.parse(await get_censored_json()); } }
-  else{ init_sample_if_empty(); censored=JSON.parse(await get_censored_json()); }
-  ephMap=JSON.parse(await get_and_refresh_eph_map());
-  renderTree(); bindUI(); updateParentOptions(); updateBatchMoveOptions();
+  if(cipher){
+    try{ censored = JSON.parse(await load_cipher_and_get_censored(cipher)); }
+    catch{ init_sample_if_empty(); censored = JSON.parse(await get_censored_json()); }
+  } else { init_sample_if_empty(); censored = JSON.parse(await get_censored_json()); }
+  ephMap = JSON.parse(await get_and_refresh_eph_map());
+  renderTree(); bindUI(); updateParentOptions();
 }
 
-// 构建树
 function buildHierarchy(list, kw=''){
-  const byId = new Map(list.map(n=>[n.id,{...n, children:[]}]));
-  const roots=[];
-  for(const n of byId.values()){ n.parent && byId.has(n.parent)?byId.get(n.parent).children.push(n):roots.push(n); }
+  const byId = new Map(list.map(n=>[n.id, {...n, children:[]}]));
+  const roots = [];
+  for(const n of byId.values()){ n.parent && byId.has(n.parent) ? byId.get(n.parent).children.push(n) : roots.push(n); }
   if(!kw) return roots;
   const k = kw.toLowerCase();
-  function prune(n){ const selfMatch=n.title.toLowerCase().includes(k)||(n.tag && n.tag.toLowerCase().includes(k)); const kids=(n.children||[]).map(prune).filter(Boolean); return (selfMatch||kids.length)?{...n,children:kids}:null; }
+  function prune(n){ const selfMatch = n.title.toLowerCase().includes(k) || (n.tag && n.tag.toLowerCase().includes(k)); const kids = (n.children||[]).map(prune).filter(Boolean); return (selfMatch || kids.length) ? {...n, children:kids} : null; }
   return roots.map(prune).filter(Boolean);
 }
 
-// 渲染树
 function renderTree(){
-  const tree = document.getElementById('bookmarkTree'); 
-  tree.innerHTML='';
+  const tree = document.getElementById('bookmarkTree'); tree.innerHTML='';
   const roots = buildHierarchy(censored, filterKeyword);
-   roots.forEach(r=>tree.appendChild(renderNode(r)));
-   
-   
   function renderNode(n){
-    const li=document.createElement('li'); 
-    li.className=n.node_type;
-
-    const header=document.createElement('div'); 
-    header.className='node-header';
-
-    // 多选 checkbox
-    if(isEditor){
-      const checkbox = document.createElement('input');
-      checkbox.type='checkbox';
-      checkbox.className='selectNode';
-      checkbox.dataset.id = n.id;
-      header.appendChild(checkbox);
-    }
-
-    const label=document.createElement('div'); 
-    label.className='node-label';
-
-    const icon=document.createElement('span'); 
-    icon.className='icon'; 
-    icon.textContent=n.node_type==='folder'?'📁':'🌐';
-
-    const name=document.createElement('span'); 
-    name.className='name'; 
-    name.textContent=n.title;
-
-    // ✅ 只在点击 name 时触发打开
-    if(n.node_type === 'file'){
-      name.onclick = async e => {
-        e.stopPropagation();
-        const eph = ephMap[n.id];
-        if(!eph){
-          alert('临时ID过期'); 
-          return;
-        }
-        await open_by_eph(eph);
-        ephMap = JSON.parse(await get_and_refresh_eph_map());
-      };
-    } else if(n.node_type === 'folder'){
-      name.onclick = e => {
-        e.stopPropagation();
-        li.classList.toggle('open');
-      };
-    }
-
-    label.appendChild(icon); 
-    label.appendChild(name);
-    if(n.tag){ 
-      const t=document.createElement('span'); 
-      t.className='tag'; 
-      t.textContent=n.tag; 
-      label.appendChild(t);
-    }
+    const li = document.createElement('li'); li.className = n.node_type;
+    const header = document.createElement('div'); header.className='node-header';
+    const label = document.createElement('div'); label.className='node-label';
+    const icon = document.createElement('span'); icon.className='icon'; icon.textContent = n.node_type==='folder'?'📁':'📄';
+    const name = document.createElement('span'); name.className='name'; name.textContent=n.title;
+    label.appendChild(icon); label.appendChild(name);
+    if(n.tag){ const t=document.createElement('span'); t.className='tag'; t.textContent=n.tag; label.appendChild(t);}
     header.appendChild(label);
 
     if(isEditor){
-      const actions=document.createElement('div'); 
-      actions.className='node-actions';
+      const actions = document.createElement('div'); actions.className='node-actions';
+      if(n.node_type==='folder'){
+        const addBtn = document.createElement('button'); addBtn.className='btn'; addBtn.textContent='添加子项';
+        addBtn.onclick=async e=>{
+          e.stopPropagation();
+          const tp = (prompt('类型 file/folder','file')||'file').toLowerCase()==='folder'?'folder':'file';
+          const title = prompt('名称',''); if(!title) return;
+          let url=null,tag=null; if(tp==='file'){ url=prompt('URL','')||''; } tag=prompt('标签','')||'';
+          await add_node(JSON.stringify({id:'', node_type:tp, title, url, tag, parent:n.id}));
+          const b64 = await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
+          censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
+          renderTree(); updateParentOptions();
+        }; actions.appendChild(addBtn);
+      }
 
-      const editBtn=document.createElement('button'); 
-      editBtn.className='btn'; 
-      editBtn.textContent='编辑';
+      const editBtn = document.createElement('button'); editBtn.className='btn'; editBtn.textContent='编辑';
       editBtn.onclick=async e=>{
-        e.stopPropagation(); 
-        const nt=prompt('名称：',n.title)||n.title; 
-        let nu=null; 
-        if(n.node_type==='file'){ nu=prompt('URL','')||''; } 
-        const tg=prompt('标签：',n.tag||'')||n.tag||''; 
-        await edit_node(n.id,nt,nu,tg,n.parent||null); 
-        await saveAndRefresh(); 
+        e.stopPropagation();
+        const nt=prompt('名称：',n.title)||n.title; let nu=null;
+        if(n.node_type==='file'){ nu=prompt('URL','')||''; }
+        const tg=prompt('标签：',n.tag||'')||n.tag||'';
+        await edit_node(n.id, nt, nu, tg, n.parent||null);
+        const b64=await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
+        censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
+        renderTree(); updateParentOptions();
       };
 
-      const moveBtn=document.createElement('button'); 
-      moveBtn.className='btn'; 
-      moveBtn.textContent='移动';
-      moveBtn.onclick=async e=>{
-        e.stopPropagation(); 
-        const pid=prompt('输入目标父级ID（留空=根）',n.parent||''); 
-        await move_node(n.id,pid||null); 
-        await saveAndRefresh(); 
-      };
-
-      const delBtn=document.createElement('button'); 
-      delBtn.className='btn'; 
-      delBtn.textContent='删除';
+      const delBtn=document.createElement('button'); delBtn.className='btn'; delBtn.textContent='删除';
       delBtn.onclick=async e=>{
-        e.stopPropagation(); 
-        if(confirm('确定删除？')){ 
-          await delete_node(n.id); 
-          await saveAndRefresh(); 
-        } 
+        e.stopPropagation(); if(!confirm('确定删除（文件夹将递归删除）？')) return;
+        await delete_node(n.id);
+        const b64=await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
+        censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
+        renderTree(); updateParentOptions();
       };
 
-      actions.appendChild(editBtn); 
-      actions.appendChild(moveBtn); 
-      actions.appendChild(delBtn);
+      const moveBtn=document.createElement('button'); moveBtn.className='btn'; moveBtn.textContent='移动到...';
+      moveBtn.onclick=async e=>{
+        e.stopPropagation();
+        const pid=prompt('输入目标父级ID（留空=根）',n.parent||'');
+        await move_node(n.id,pid||null);
+        const b64=await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
+        censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
+        renderTree(); updateParentOptions();
+      };
+
+      actions.appendChild(editBtn); actions.appendChild(moveBtn); actions.appendChild(delBtn);
       header.appendChild(actions);
     }
 
+    header.onclick=async e=>{
+      e.stopPropagation();
+      if(n.node_type==='folder'){
+        li.classList.toggle('open');
+      }else{
+        const eph = ephMap[n.id];
+        if(!eph){ alert('临时ID不存在或已过期，请刷新。'); return; }
+        try{ await open_by_eph(eph); ephMap=JSON.parse(await get_and_refresh_eph_map()); }catch(err){ alert('打开失败：'+err); }
+      }
+    };
     li.appendChild(header);
 
-    if(n.children && n.children.length){ 
-      const ul=document.createElement('ul'); 
-      n.children.forEach(c=>ul.appendChild(renderNode(c))); 
-      li.appendChild(ul); 
+    if(n.children && n.children.length){
+      const ul=document.createElement('ul');
+      n.children.forEach(c=>ul.appendChild(renderNode(c)));
+      li.appendChild(ul);
     }
-
     return li;
   }
-     
-	 
-	 
-	 
-	 
-	 
-	 
-	 
-	 renderBatchActions();
- 
+  roots.forEach(r=>tree.appendChild(renderNode(r)));
 }
 
-// 更新父级下拉
-function updateParentOptions() {
-  const sel = document.getElementById('parentIn'); // 确保 select 的 id 是 parentIn
-  if (!sel) return;
-
-  sel.innerHTML = ''; // 先清空
-
-  // 根目录选项
-  sel.innerHTML = `<option value="">根目录</option>`;
-
-  // 遍历 censored 中所有 folder，生成 option
-  censored
-    .filter(n => n.node_type === 'folder')
-    .forEach(f => {
-      sel.innerHTML += `<option value="${f.id}">${f.title} (${f.id})</option>`;
-    });
+function updateParentOptions(){
+  const sel=document.getElementById('parentIn'); sel.innerHTML=`<option value="">根目录</option>`;
+  censored.filter(n=>n.node_type==='folder').forEach(f=>{
+    sel.innerHTML+=`<option value="${f.id}">${f.title} (${f.id})</option>`;
+  });
 }
 
-
-// 更新批量移动下拉
-function updateBatchMoveOptions(){
-  const sel=document.getElementById('batchMoveTarget'); sel.innerHTML='<option value="">根目录</option>';
-  censored.filter(n=>n.node_type==='folder').forEach(f=>{ sel.innerHTML+=`<option value="${f.id}">${f.title}</option>`; });
-}
-
-// 保存刷新
-async function saveAndRefresh(){
-  const b64=await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
-  censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
-  renderTree(); updateParentOptions(); updateBatchMoveOptions();
-}
-
-// UI绑定
 function bindUI(){
-  const editorBtn=document.getElementById('editorBtn'); const editorPanel=document.getElementById('editorPanel'); const batchActions=document.getElementById('batchActions');
+  const editorBtn=document.getElementById('editorBtn'); const editorPanel=document.getElementById('editorPanel');
   editorBtn.onclick=async ()=>{
     if(!isEditor){
-      const pass=prompt('请输入编辑口令'); if(!pass) return;
+      const pass=prompt('请输入编辑者口令'); if(!pass) return;
       if(!verify_editor(pass)){ alert('口令错误'); return; }
-      isEditor=true; editorPanel.style.display='block'; batchActions.style.display='block'; editorBtn.textContent='退出编辑模式';
-	  // 切换编辑模式
-  
-  document.getElementById('importFile').style.display = isEditor ? 'inline-block' : 'none';
-  document.getElementById('importBtn2').style.display = isEditor ? 'inline-block' : 'none';
-  document.getElementById('importBtn').style.display = isEditor ? 'inline-block' : 'none';
-  renderTree(); // 刷新书签树显示多选 checkbox
- 
-      renderTree();
-    } else {
-      isEditor=false; editorPanel.style.display='none'; batchActions.style.display='none'; editorBtn.textContent='进入编辑模式'; renderTree();
+      isEditor=true; editorPanel.style.display='block'; editorBtn.textContent='退出编辑模式';
+      ephMap=JSON.parse(await get_and_refresh_eph_map()); renderTree();
+    }else{
+      isEditor=false; editorPanel.style.display='none'; editorBtn.textContent='进入编辑模式'; renderTree();
     }
   };
 
   document.getElementById('addBtn').onclick=async ()=>{
     if(!isEditor){ alert('请先进入编辑模式'); return; }
-    const tp=document.getElementById('typeIn').value; const t=document.getElementById('titleIn').value.trim();
-    const u=document.getElementById('urlIn').value.trim(); const tg=document.getElementById('tagIn').value.trim();
-    const p=document.getElementById('parentIn').value||null; if(!t){ alert('名称必填'); return; }
-    await add_node(JSON.stringify({id:'', node_type:tp, title:t, url:tp==='file'?u:null, tag:tg||null, parent:p})); await saveAndRefresh();
+    const tp=document.getElementById('typeIn').value;
+    const t=document.getElementById('titleIn').value.trim();
+    const u=document.getElementById('urlIn').value.trim();
+    const tg=document.getElementById('tagIn').value.trim();
+    const p=document.getElementById('parentIn').value||null;
+    if(!t){ alert('名称必填'); return; }
+    if(tp==='file' && !u){ alert('URL 仅在添加文件时必填'); return; }
+
+    await add_node(JSON.stringify({id:'', node_type:tp, title:t, url:tp==='file'?u:null, tag:tg||null, parent:p}));
+    const b64=await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
+    censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
+
     document.getElementById('titleIn').value=''; document.getElementById('urlIn').value=''; document.getElementById('tagIn').value=''; document.getElementById('typeIn').value='file'; document.getElementById('parentIn').value='';
+    renderTree(); updateParentOptions();
   };
 
-  document.getElementById('searchInput').oninput=e=>{ filterKeyword=e.target.value.trim(); renderTree(); };
+  const search=document.getElementById('searchInput'); search.addEventListener('input',()=>{ filterKeyword=search.value.trim(); renderTree(); });
+  document.getElementById('clearSearchBtn').onclick=()=>{ filterKeyword=''; search.value=''; renderTree(); };
 
- 
-  
-  
-   document.getElementById('importBtn').onclick = async () => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-
-  input.onchange = async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const text = await file.text();
-    let list = [];
-    try {
-      list = JSON.parse(text);
-    } catch {
-      return alert('❌ JSON 格式错误，请检查文件内容');
-    }
-
-    let successCount = 0;
-    for (const it of list) {
-      if (!it.title) continue;
-      await add_node(JSON.stringify({
-        id: '',
-        node_type: it.node_type || 'file',
-        title: it.title,
-        url: it.url || null,
-        tag: it.tag || null,
-        parent: it.parent || null
-      }));
-      successCount++;
-    }
-
-    // 数据保存到本地存储
-    const b64 = await export_encrypted();
-    localStorage.setItem(STORAGE_KEY, b64);
-
-    censored = JSON.parse(await get_censored_json());
-    ephMap = JSON.parse(await get_and_refresh_eph_map());
-
-    renderTree();
-    updateParentOptions();
-
-    // ✅ 导入成功提示
-    alert(`✅ 导入成功，共导入 ${successCount} 条数据`);
+  // 批量导入
+  document.getElementById('importBtn').onclick=async ()=>{
+    if(!isEditor){ alert('请先进入编辑模式'); return; }
+    const input=document.createElement('input'); input.type='file'; input.accept='.json';
+    input.onchange=async e=>{
+      const file=e.target.files[0]; if(!file) return;
+      const text=await file.text(); let list=[];
+      try{ list=JSON.parse(text); } catch{ alert('JSON 格式错误'); return; }
+      let addedCount=0;
+      for(const it of list){
+        if(!it.title) continue;
+        const nodeData={id:'', node_type:it.node_type||'file', title:it.title, url:it.url||null, tag:it.tag||null, parent:it.parent||null};
+        try{ await add_node(JSON.stringify(nodeData)); addedCount++; }catch(err){ console.warn('导入失败',nodeData,err); }
+      }
+      if(addedCount>0){
+        const b64=await export_encrypted(); localStorage.setItem(STORAGE_KEY,b64);
+        censored=JSON.parse(await get_censored_json()); ephMap=JSON.parse(await get_and_refresh_eph_map());
+        renderTree(); updateParentOptions(); alert(`导入完成，共导入 ${addedCount} 条有效书签`);
+      }else{ alert('没有有效书签可导入'); }
+    }; input.click();
   };
-
-  input.click();
-};
-
- 
 }
 
-// 主题
+// 主题控制
 function applyTheme(theme){ document.documentElement.style.setProperty("--bg-color",theme.bg); document.documentElement.style.setProperty("--text-color",theme.text); }
 const savedTheme=JSON.parse(localStorage.getItem("userTheme")); if(savedTheme) applyTheme(savedTheme);
-document.getElementById("bgPicker").oninput=e=>{ const theme={bg:e.target.value, text:document.getElementById("textPicker").value}; applyTheme(theme); localStorage.setItem("userTheme",JSON.stringify(theme)); };
-document.getElementById("textPicker").oninput=e=>{ const theme={bg:document.getElementById("bgPicker").value, text:e.target.value}; applyTheme(theme); localStorage.setItem("userTheme",JSON.stringify(theme)); };
+document.getElementById("bgPicker").addEventListener("input",e=>{ const theme={bg:e.target.value, text:document.getElementById("textPicker").value}; applyTheme(theme); localStorage.setItem("userTheme",JSON.stringify(theme)); });
+document.getElementById("textPicker").addEventListener("input",e=>{ const theme={bg:document.getElementById("bgPicker").value, text:e.target.value}; applyTheme(theme); localStorage.setItem("userTheme",JSON.stringify(theme)); });
+async function loadDefaultData(){
+  const res = await fetch('/localStorage-data (1).json');
+  const cipher = await res.text();
+  localStorage.setItem(STORAGE_KEY, cipher);  // 可选，保存到本地
+  censored = JSON.parse(await load_cipher_and_get_censored(cipher));
+  ephMap = JSON.parse(await get_and_refresh_eph_map());
+  renderTree();
+}
+loadDefaultData
+ //////
 
-
-
-
-
-// ✅ 导出 LocalStorage 数据为 JSON 文件
+ 
+    // ✅ 导出 LocalStorage 数据为 JSON 文件
     document.getElementById("exportBtn").onclick = function () {
       const data = {};
       for (let i = 0; i < localStorage.length; i++) {
@@ -399,212 +285,32 @@ document.getElementById("textPicker").oninput=e=>{ const theme={bg:document.getE
 
       URL.revokeObjectURL(url);
     };
-	
-	
-	// ✅ 导入 JSON 文件写入 LocalStorage
-  document.getElementById("importBtn2").onclick = async function () {
-  const fileInput = document.getElementById("importFile");
-  if (!fileInput.files.length) {
-    alert("请选择一个 JSON 文件！");
-    return;
-  }
 
-  const file = fileInput.files[0];
-  const reader = new FileReader();
-
-  reader.onload = async function (e) {
-    try {
-      const data = JSON.parse(e.target.result);
-
-      // 遍历 JSON 的每个 key，写入 localStorage
-      for (const key in data) {
-        localStorage.setItem(key, data[key]);
+    // ✅ 导入 JSON 文件写入 LocalStorage
+    document.getElementById("importBtn").onclick = function () {
+      const fileInput = document.getElementById("importFile");
+      if (!fileInput.files.length) {
+        alert("请选择一个 JSON 文件！");
+        return;
       }
-
-      // 立即刷新书签树
-      if (localStorage.getItem(STORAGE_KEY)) {
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      reader.onload = function (e) {
         try {
-          censored = JSON.parse(await load_cipher_and_get_censored(localStorage.getItem(STORAGE_KEY)));
+          const data = JSON.parse(e.target.result);
+          for (const key in data) {
+            localStorage.setItem(key, data[key]);
+          }
+          alert("导入成功！请刷新页面查看数据。");
+          document.getElementById("preview").textContent = JSON.stringify(data, null, 2);
         } catch (err) {
-          alert("解密失败，可能文件不是正确的 Base64 加密格式");
-          return;
+          alert("导入失败：文件格式错误！");
         }
-      }
-
-      // 刷新 ephMap
-      ephMap = JSON.parse(await get_and_refresh_eph_map());
-
-      // 渲染书签树
-      renderTree();
-      updateParentOptions();
-
-      alert("导入成功，书签树已刷新！");
-    } catch (err) {
-      alert("导入失败：文件格式错误！");
-      console.error(err);
-    }
-  };
-
-  reader.readAsText(file);
-};
-
-async function loadDefaultDataFromFile(filename = './localStorage-data22.json') {
-  try {
-    // 读取本地加密 JSON 文件
-    const res = await fetch(filename);
-    const fileContent = await res.text();
-
-    // 解析 JSON
-    const localData = JSON.parse(fileContent);
-
-    // 取出加密数据
-    const cipher = localData["bookmarks_cipher_wasm_ephem_v1"];
-    if (!cipher) throw new Error("JSON 中未找到加密字段 bookmarks_cipher_wasm_ephem_v1");
-
-    // 保存到 localStorage (可选)
-    localStorage.setItem(STORAGE_KEY, cipher);
-
-    // 使用 wasm 函数解密
-    censored = JSON.parse(await load_cipher_and_get_censored(cipher));
-
-    // 刷新临时 ephMap
-    ephMap = JSON.parse(await get_and_refresh_eph_map());
-
-    // 渲染书签树和父级下拉
-    renderTree();
-    updateParentOptions();
-
-    console.log("默认数据加载完成！");
-  } catch (err) {
-    console.error("加载默认数据失败：", err);
-    alert("加载默认书签数据失败，请检查文件格式或路径！");
-  }
-}
-
-
-
-
-
- 
- 
- 
- 
- 
- 
- 
-  
-
-
-   
- 
- 
- 
-function renderBatchActions() {  
- if (!isEditor) return;
-
-function tryInsert() {
-  const tree = document.getElementById("bookmarkTree");
-  if (!tree || !tree.parentNode) {
-    requestAnimationFrame(tryInsert);
-    return;
-  }
-
-  let panel = document.getElementById("batchPanel");
-  if (!panel) {
-    panel = document.createElement("div");
-    panel.id = "batchPanel";
-    panel.className = "batch-panel";
-
-    // 批量移动下拉选择
-    panel.appendChild(document.createTextNode("移动到： "));
-    const folderSelect = document.createElement("select");
-    folderSelect.id = "batchTargetFolder";
-    panel.appendChild(folderSelect);
-
-    // 批量移动按钮
-    const batchMoveBtn = document.createElement("button");
-    batchMoveBtn.textContent = "执行移动";
-    batchMoveBtn.onclick = async () => {
-      const nodes = document.querySelectorAll(".selectNode:checked");
-      if (nodes.length === 0) { alert("请先选择节点"); return; }
-      const pid = folderSelect.value || null;
-      for (let chk of nodes) {
-        const id = chk.dataset.id;
-        await move_node(id, pid);
-      }
-      await saveAndRefresh();
-    };
-    panel.appendChild(batchMoveBtn);
-
-    // 批量改标签
-    const batchTagBtn = document.createElement("button");
-    batchTagBtn.textContent = "批量改标签";
-    batchTagBtn.onclick = async () => {
-      const nodes = document.querySelectorAll(".selectNode:checked");
-      if (nodes.length === 0) { alert("请先选择节点"); return; }
-      const newTag = prompt("输入新的标签：", "");
-      if (newTag === null) return;
-      for (let chk of nodes) {
-        const id = chk.dataset.id;
-        await edit_node(id, null, null, newTag, null);
-      }
-      await saveAndRefresh();
-    };
-    panel.appendChild(batchTagBtn);
-
-    // 批量删除
-    const batchDelBtn = document.createElement("button");
-    batchDelBtn.textContent = "批量删除";
-    batchDelBtn.onclick = async () => {
-      const nodes = document.querySelectorAll(".selectNode:checked");
-      if (nodes.length === 0) { alert("请先选择节点"); return; }
-      if (!confirm("确定要批量删除这些节点吗？")) return;
-      for (let chk of nodes) {
-        const id = chk.dataset.id;
-        await delete_node(id);
-      }
-      await saveAndRefresh();
-    };
-    panel.appendChild(batchDelBtn);
-  }
-
-  // 🔹 每次渲染前刷新下拉列表
-  const folderSelect = document.getElementById("batchTargetFolder");
-  if (folderSelect) {
-    folderSelect.innerHTML = '';
-    const rootOption = document.createElement("option");
-    rootOption.value = '';
-    rootOption.textContent = "根目录";
-    folderSelect.appendChild(rootOption);
-    censored.filter(n => n.node_type === 'folder')
-            .forEach(f => {
-              const opt = document.createElement("option");
-              opt.value = f.id;
-              opt.textContent = f.title;
-              folderSelect.appendChild(opt);
-            });
-  }
-
-  if (!tree.parentNode.contains(panel)) {
-    tree.parentNode.insertBefore(panel, tree);
-  }
-}
-
-requestAnimationFrame(tryInsert);
-
-}
-
-
-
- 
- 
+      };
+      reader.readAsText(file);
+    }; 
 boot();
-bindUI(); 
-loadDefaultDataFromFile();
-
-    
-
-
 </script>
 </body>
 </html>
+
